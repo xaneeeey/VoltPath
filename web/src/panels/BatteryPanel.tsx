@@ -118,7 +118,7 @@ export function BatteryPanel({ ctx }: { ctx: Ctx }) {
           </Card>
 
           <div className="mt-6 flex items-center justify-between">
-            <Label>{list === 'anomalies' ? 'Abnormal degradation (robust z > 3.5)' : 'Soonest to 80 % SoH'}</Label>
+            <Label>{list === 'anomalies' ? 'Abnormal degradation · z > 3.5' : 'Soonest to 80 % SoH'}</Label>
             <Segmented value={list} onChange={setList} options={[{ value: 'anomalies', label: 'Anomalies' }, { value: 'risk', label: 'At risk' }]} />
           </div>
           <ul className="mt-2 divide-y divide-line">

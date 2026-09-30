@@ -59,6 +59,9 @@ spec:
       containers:
         - name: web
           image: {{ .Values.image.web }}
+          env:
+            - { name: NGINX_RESOLVER, value: kube-dns.kube-system.svc.cluster.local }
+            - { name: API_UPSTREAM, value: "http://voltpath-api.{{ .Release.Namespace }}.svc.cluster.local:8000" }
           ports: [{ containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /, port: 8080 } }
           resources: {{- toYaml .Values.web.resources | nindent 12 }}

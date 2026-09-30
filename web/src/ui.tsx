@@ -67,10 +67,10 @@ export function Segmented<T extends string>({ value, options, onChange }: {
   value: T; options: { value: T; label: string }[]; onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex rounded-full border border-line bg-sunken p-0.5" role="tablist">
+    <div className="inline-flex shrink-0 rounded-full border border-line bg-sunken p-0.5" role="tablist">
       {options.map((o) => (
         <button key={o.value} role="tab" aria-selected={value === o.value} onClick={() => onChange(o.value)}
-          className={cx('rounded-full px-3 py-1 text-xs font-medium transition-colors',
+          className={cx('whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition-colors',
             value === o.value ? 'bg-fg text-bg' : 'text-muted hover:text-fg')}>
           {o.label}
         </button>

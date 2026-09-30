@@ -57,7 +57,7 @@ export function FleetPanel({ ctx }: { ctx: Ctx }) {
               <div className="label mt-2">of {fmt.n(s.vehicles)} vehicles online</div>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-light tabular" style={{ color: socColor(s.avg_soc ?? 0) }}>{fmt.n(s.avg_soc)}<span className="text-base text-muted">%</span></div>
+              <div className="text-3xl font-light tabular" style={{ color: s.avg_soc == null ? 'var(--muted)' : socColor(s.avg_soc) }}>{fmt.n(s.avg_soc)}<span className="text-base text-muted">%</span></div>
               <div className="label mt-1">average SoC</div>
             </div>
           </div>
