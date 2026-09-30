@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "voltpath",
+      "credentials": [{ "accessKey": "voltpath", "secretKey": "voltpath-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

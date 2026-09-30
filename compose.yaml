@@ -1,0 +1,189 @@
+# VoltPath - one-command local stack:  docker compose up -d --build
+# Infra: TimescaleDB(+pgvector) · Redpanda (Kafka API) · Redis · SeaweedFS (S3) · Prometheus · Grafana
+# App:   migrate+seed -> ingest (OEM webhooks) -> processor / lake-writer -> api -> web ; simulator ; batch
+
+x-app: &app
+  build: { context: ., dockerfile: infra/docker/python.Dockerfile }
+  image: voltpath/python:dev
+  restart: unless-stopped
+  env_file: [ .env.example ]
+  environment: &appenv
+    DATABASE_URL: postgresql://voltpath:voltpath@postgres:5432/voltpath
+    APP_DATABASE_URL: postgresql://voltpath_app:voltpath_app@postgres:5432/voltpath
+    REDIS_URL: redis://redis:6379/0
+    KAFKA_BOOTSTRAP: redpanda:9092
+    S3_ENDPOINT: http://seaweedfs:8333
+    JWT_PRIVATE_KEY_PATH: /secrets/jwt_private.pem
+  volumes:
+    - secrets:/secrets
+    - models:/app/data/models
+  depends_on: &appdeps
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    redpanda: { condition: service_healthy }
+    init: { condition: service_completed_successfully }
+
+services:
+  # ------------------------------------------------------------------ infrastructure
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: voltpath
+      POSTGRES_PASSWORD: voltpath
+      POSTGRES_DB: voltpath
+    command: >
+      postgres -c shared_buffers=1GB -c max_connections=300 -c work_mem=32MB
+               -c maintenance_work_mem=512MB -c max_wal_size=4GB -c synchronous_commit=off
+               -c timescaledb.max_background_workers=8 -c shared_preload_libraries=timescaledb,pg_stat_statements
+               -c track_io_timing=on
+    ports: ["5432:5432"]
+    volumes: [pgdata:/home/postgres/pgdata]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voltpath -d voltpath"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp=2
+      - --memory=2G
+      - --overprovisioned
+      - --mode=dev-container
+      - --default-log-level=warn
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports: ["19092:19092", "9644:9644"]
+    volumes: [redpanda:/var/lib/redpanda/data]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  console:
+    image: redpandadata/console:latest
+    restart: unless-stopped
+    environment: { KAFKA_BROKERS: redpanda:9092 }
+    ports: ["8081:8080"]
+    depends_on: { redpanda: { condition: service_healthy } }
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "2gb",
+              "--maxmemory-policy", "volatile-lru"]
+    ports: ["6379:6379"]
+    volumes: [redis:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=0 -master.volumeSizeLimitMB=512
+    ports: ["8333:8333"]
+    volumes:
+      - lake:/data
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports: ["9090:9090"]
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: voltpath-grafana
+      GF_USERS_DEFAULT_THEME: dark
+    ports: ["3000:3000"]
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  # ------------------------------------------------------------------ one-shot init
+  init:
+    <<: *app
+    restart: "no"
+    command: ["python", "-m", "voltpath.init"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+      seaweedfs: { condition: service_started }
+
+  # ------------------------------------------------------------------ pipeline
+  ingest:
+    <<: *app
+    command: ["python", "-m", "voltpath.ingest"]
+    environment:
+      <<: *appenv
+      INGEST_WORKERS: "4"
+    ports: ["8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/healthz')"]
+      interval: 5s
+      retries: 20
+
+  processor:
+    <<: *app
+    command: ["python", "-m", "voltpath.processor"]
+    deploy: { replicas: 3 }
+
+  lake-writer:
+    <<: *app
+    command: ["python", "-m", "voltpath.processor.lake"]
+
+  simulator:
+    <<: *app
+    command: ["python", "-m", "voltpath.simulator"]
+    environment:
+      <<: *appenv
+      INGEST_URL: http://ingest:8001
+      SIM_PROCS: "4"
+    depends_on:
+      <<: *appdeps
+      ingest: { condition: service_healthy }
+
+  batch:
+    <<: *app
+    command: ["python", "-m", "voltpath.batch", "scheduler"]
+
+  api:
+    <<: *app
+    command: ["python", "-m", "voltpath.api"]
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      retries: 20
+
+  web:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile }
+    image: voltpath/web:dev
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  redpanda:
+  redis:
+  lake:
+  secrets:
+  models:
