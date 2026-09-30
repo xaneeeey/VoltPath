@@ -1,0 +1,63 @@
+{
+  "routing": {
+    "graph": {
+      "nodes": 45373,
+      "edges": 49758
+    },
+    "pairs": 60,
+    "astar_median_expanded": 2004,
+    "dijkstra_median_expanded": 15962,
+    "expansion_ratio": 8.0,
+    "astar_median_ms": 12.94,
+    "dijkstra_median_ms": 55.79,
+    "multi_target_k3_median_ms": 0.37
+  },
+  "charging_dp": [
+    {
+      "charger_kw": 7.4,
+      "ms": 6.7,
+      "cost": 370.65,
+      "charge_now_cost": 585.05,
+      "saving_pct": 36.6
+    },
+    {
+      "charger_kw": 11,
+      "ms": 10.9,
+      "cost": 357.24,
+      "charge_now_cost": 695.94,
+      "saving_pct": 48.7
+    },
+    {
+      "charger_kw": 22,
+      "ms": 14.2,
+      "cost": 356.9,
+      "charge_now_cost": 778.97,
+      "saving_pct": 54.2
+    },
+    {
+      "charger_kw": 60,
+      "ms": 40.1,
+      "cost": 356.81,
+      "charge_now_cost": 778.9,
+      "saving_pct": 54.2
+    }
+  ],
+  "bloom": {
+    "bits_mb": 3.59,
+    "k": 10,
+    "add_us": 22.1,
+    "measured_fp_rate_at_1pct_load": 0.0
+  },
+  "count_min": {
+    "width": 1360,
+    "depth": 5,
+    "add_us": 17.1,
+    "top10_recall": 1.0
+  },
+  "vin": {
+    "cold_us": 2.68,
+    "cached_us": 0.072
+  },
+  "geohash_encode_us": 6.14,
+  "viterbi_8640_points_ms": 19.3
+}

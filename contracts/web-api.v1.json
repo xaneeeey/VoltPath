@@ -1,0 +1,29 @@
+{
+  "consumer": "voltpath-web",
+  "provider": "voltpath-api",
+  "description": "Every endpoint the React UI calls (web/src). The provider must keep these paths and methods; removals are breaking changes.",
+  "interactions": [
+    {"method": "post", "path": "/v1/auth/token"},
+    {"method": "get", "path": "/v1/auth/me"},
+    {"method": "get", "path": "/v1/fleet/summary"},
+    {"method": "get", "path": "/v1/fleets"},
+    {"method": "get", "path": "/v1/vehicles"},
+    {"method": "get", "path": "/v1/vehicles/{vin}"},
+    {"method": "get", "path": "/v1/vehicles/{vin}/telemetry"},
+    {"method": "get", "path": "/v1/vehicles/{vin}/battery"},
+    {"method": "get", "path": "/v1/vehicles/{vin}/reachable-chargers"},
+    {"method": "get", "path": "/v1/map/vehicles"},
+    {"method": "get", "path": "/v1/map/chargers"},
+    {"method": "post", "path": "/v1/charging/plan"},
+    {"method": "post", "path": "/v1/charging/schedules"},
+    {"method": "get", "path": "/v1/charging/schedules"},
+    {"method": "get", "path": "/v1/alerts"},
+    {"method": "post", "path": "/v1/alerts/{alert_id}/ack"},
+    {"method": "get", "path": "/v1/analytics/battery-report"},
+    {"method": "post", "path": "/v1/copilot/chat"},
+    {"method": "post", "path": "/v1/copilot/actions/{action_id}/confirm"},
+    {"method": "get", "path": "/v1/audit"}
+  ],
+  "websocket": "/v1/ws/live",
+  "live_state_fields": ["vin", "ts", "lat", "lon", "speed", "soc", "soh", "temp", "power", "odo", "status", "charger_id", "dtc"]
+}

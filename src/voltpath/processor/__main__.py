@@ -99,16 +99,7 @@ class Processor:
         self.cms_reset = time.time()
         self.free_nodes: dict[int, int] = {n: sid for sid, n in self.ref.station_node.items()}
         self.last_agg = 0.0
-        self.consumer = Consumer({
-            "bootstrap.servers": self.s.kafka_bootstrap,
-            "group.id": "processor",
-            "client.id": socket.gethostname(),
-            "enable.auto.commit": False,
-            "auto.offset.reset": "earliest",
-            "partition.assignment.strategy": "cooperative-sticky",
-            "fetch.min.bytes": 1,
-            "max.poll.interval.ms": 120_000,
-        })
+        self.consumer: Consumer | None = None   # created in run(): process() is usable without a broker
         self.running = True
         with self.pg.cursor() as cur:
             cur.execute("CREATE TEMP TABLE tstage (LIKE telemetry INCLUDING DEFAULTS) ON COMMIT DELETE ROWS")
@@ -141,6 +132,16 @@ class Processor:
 
     # ------------------------------------------------------------------ main loop
     def run(self):
+        self.consumer = Consumer({
+            "bootstrap.servers": self.s.kafka_bootstrap,
+            "group.id": "processor",
+            "client.id": socket.gethostname(),
+            "enable.auto.commit": False,
+            "auto.offset.reset": "earliest",
+            "partition.assignment.strategy": "cooperative-sticky",
+            "fetch.min.bytes": 1,
+            "max.poll.interval.ms": 120_000,
+        })
         self.consumer.subscribe([self.s.topic_raw], on_assign=self.on_assign, on_revoke=self.on_revoke)
         last_lag = 0.0
         while self.running:

@@ -16,4 +16,6 @@ secrets/
 .DS_Store
 infra/terraform/**/.terraform/
 infra/terraform/**/*.tfstate*
+tests/security/reports/
+coverage.xml
 .claude/

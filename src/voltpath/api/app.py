@@ -8,6 +8,7 @@ present (decoded once, cheaply) and fall back to client IP.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
 import uuid
@@ -36,6 +37,15 @@ if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return c
 """
 SKIP_AUDIT = ("/healthz", "/readyz", "/metrics", "/docs", "/openapi.json", "/.well-known")
+
+
+def _client_ip(request: Request) -> str | None:
+    """Only a syntactically valid IP goes into the INET column (proxies/test clients may report names)."""
+    host = request.client.host if request.client else None
+    try:
+        return str(ipaddress.ip_address(host)) if host else None
+    except ValueError:
+        return None
 
 
 class AuditWriter:
@@ -100,7 +110,7 @@ def create_app() -> FastAPI:
             details.update(getattr(request.state, "audit_details", {}))
             audit_writer.put((time.time(), p.tenant_id, p.user_id, p.actor_type,
                               f"{request.method} {request.scope.get('route').path if request.scope.get('route') else path}",
-                              path, response.status_code, request.client.host if request.client else None,
+                              path, response.status_code, _client_ip(request),
                               orjson.dumps(details).decode()))
         return response
 

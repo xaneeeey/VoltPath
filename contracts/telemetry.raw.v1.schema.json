@@ -1,0 +1,128 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "PERIODIC",
+        "TRIP_START",
+        "TRIP_END",
+        "CHARGE_START",
+        "CHARGE_STOP",
+        "HARSH_BRAKE",
+        "FAULT"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "$id": "voltpath/telemetry.raw/v1",
+  "additionalProperties": false,
+  "properties": {
+    "batt_temp_c": {
+      "maximum": 120,
+      "minimum": -40,
+      "title": "Batt Temp C",
+      "type": "number"
+    },
+    "charger_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Charger Id"
+    },
+    "dtc": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Dtc",
+      "type": "array"
+    },
+    "evt": {
+      "$ref": "#/$defs/EventType",
+      "default": "PERIODIC"
+    },
+    "lat": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Lat",
+      "type": "number"
+    },
+    "lon": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Lon",
+      "type": "number"
+    },
+    "odo_km": {
+      "minimum": 0,
+      "title": "Odo Km",
+      "type": "number"
+    },
+    "oem": {
+      "title": "Oem",
+      "type": "string"
+    },
+    "power_kw": {
+      "default": 0.0,
+      "title": "Power Kw",
+      "type": "number"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "soc_pct": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Soc Pct",
+      "type": "number"
+    },
+    "soh_pct": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Soh Pct",
+      "type": "number"
+    },
+    "speed_kmh": {
+      "maximum": 300,
+      "minimum": 0,
+      "title": "Speed Kmh",
+      "type": "number"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    },
+    "v": {
+      "default": 1,
+      "title": "V",
+      "type": "integer"
+    },
+    "vin": {
+      "title": "Vin",
+      "type": "string"
+    }
+  },
+  "required": [
+    "vin",
+    "ts",
+    "oem",
+    "seq",
+    "lat",
+    "lon",
+    "speed_kmh",
+    "soc_pct",
+    "soh_pct",
+    "batt_temp_c",
+    "odo_km"
+  ],
+  "title": "TelemetryEvent",
+  "type": "object"
+}

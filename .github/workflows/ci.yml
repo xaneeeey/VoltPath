@@ -1,0 +1,96 @@
+name: ci
+on:
+  push:
+  pull_request:
+concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }
+permissions: { contents: read, security-events: write }
+
+jobs:
+  lint-unit-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true }
+      - run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check src tests tools
+      - name: Unit tests + coverage gate (80 %)
+        run: uv run pytest tests/unit --cov --cov-report=xml --cov-report=term --cov-fail-under=80 -p no:warnings
+      - name: Contract tests
+        run: uv run pytest tests/contract -p no:warnings
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage, path: coverage.xml }
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: lint-unit-contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true }
+      - run: uv sync --frozen
+      - name: Integration tests (Testcontainers - Timescale, Redis, Redpanda)
+        run: uv run pytest tests/integration -m integration -p no:warnings
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci && npm run build
+        working-directory: web
+
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep (OWASP Top 10, Python, TS, Dockerfile, secrets)
+        run: |
+          pipx run semgrep scan --config p/owasp-top-ten --config p/python --config p/typescript \
+            --config p/dockerfile --config p/secrets --sarif -o semgrep.sarif --error src web/src infra || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: semgrep.sarif }
+
+  images-e2e:
+    runs-on: ubuntu-latest
+    needs: [integration, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: Build + start the full stack
+        run: SIM_RATE=5000 docker compose up -d --build --wait api ingest web
+      - name: Trivy (dependencies + images, fail on HIGH/CRITICAL with fixes)
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: image, image-ref: voltpath/python:dev, severity: "HIGH,CRITICAL", ignore-unfixed: true, exit-code: "1" }
+      - name: Trivy filesystem (lockfiles, IaC)
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: fs, scan-ref: ".", scanners: "vuln,misconfig,secret", severity: "HIGH,CRITICAL", ignore-unfixed: true }
+      - name: Wait for live data
+        run: sleep 60
+      - name: BDD acceptance scenarios
+        run: cd tests/bdd && uv run behave --no-capture
+      - name: Chaos - kill broker + processor, prove no loss
+        run: uv run python tests/chaos/kill_and_recover.py --vins 30 --events 120
+      - name: Load smoke (20K ev/s for 60 s)
+        run: uv run python tests/load/ingest_load.py --rate 20000 --duration 60 --workers 4
+      - name: OWASP ZAP API baseline (DAST)
+        run: |
+          docker run --rm --network host -v $PWD/tests/security:/zap/wrk ghcr.io/zaproxy/zaproxy:stable \
+            zap-api-scan.py -t http://localhost:8000/openapi.json -f openapi -r zap-report.html -c zap-rules.conf || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: evidence, path: "tests/load/results\ntests/chaos/results\ntests/security/zap-report.html" }
+      - if: always()
+        run: docker compose logs --tail=200 > compose-logs.txt; docker compose down -v
+
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+      - run: tofu -chdir=infra/terraform/aws init -backend=false && tofu -chdir=infra/terraform/aws validate && tofu fmt -check -recursive infra/terraform
+      - uses: azure/setup-helm@v4
+      - run: helm lint infra/helm/voltpath && helm template voltpath infra/helm/voltpath > /dev/null

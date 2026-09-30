@@ -8,6 +8,7 @@ who invoked it.
 from __future__ import annotations
 
 import math
+from dataclasses import asdict
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -118,7 +119,7 @@ async def vehicle_detail(p: Principal, vin: str) -> dict:
     out = {"vehicle": master, "state": mask(p, st) if st else None}
     if st:
         out["range"] = await range_for(p, vin, st, master["model_code"])
-        out["dtc"] = [describe(c).__dict__ for c in st.get("dtc", [])]
+        out["dtc"] = [asdict(describe(c)) for c in st.get("dtc", [])]
     async with tenant_tx(p) as c:
         out["forecast"] = await (await c.execute(
             "SELECT soh_now, slope_per_year, days_to_80, anomaly_score, dc_fast_share, computed_at "
