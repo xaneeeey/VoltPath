@@ -190,7 +190,7 @@ async def run_tool(p: Principal, name: str, inp: dict) -> dict:
         action_id = secrets.token_urlsafe(12)
         await R.redis.set(f"pending:{a.tenant_id}:{action_id}",
                           orjson.dumps({"kind": "schedule_charging", "plan": plan, "user_id": a.user_id,
-                                        "created": time.time()}), ex=PENDING_TTL_S)
+                                        "created": time.time()}, option=orjson.OPT_SERIALIZE_NUMPY), ex=PENDING_TTL_S)
         return {"status": "awaiting_user_confirmation", "action_id": action_id,
                 "summary": f"Charge {plan['vin']} at {plan['charger']['station']} to {plan['target_soc']:.0f}% "
                            f"by {plan['depart_at']} for about INR {plan['cost']:.0f} "

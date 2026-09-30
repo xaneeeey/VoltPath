@@ -1,5 +1,5 @@
 import { BatteryMedium, Bell, CarFront, LogOut, Moon, ShieldCheck, Sparkles, Sun, Truck, X, Zap } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, auth, liveSocketUrl, setUnauthorizedHandler, type Alert, type Me, type Station, type Summary } from './api'
 import { Login } from './components/Login'
 import { MapView } from './components/MapView'
@@ -66,6 +66,7 @@ function Shell({ me, theme, toggleTheme, onLogout }: { me: Me; theme: 'dark' | '
   const [liveAlerts, setLiveAlerts] = useState<Alert[]>([])
   const [toasts, setToasts] = useState<Alert[]>([])
   const [connected, setConnected] = useState(false)
+  const lastToast = useRef(0)
   const clock = useClock()
   const perms = useMemo(() => new Set(me.permissions), [me])
   const can = useCallback((p: string) => perms.has(p), [perms])
@@ -85,8 +86,10 @@ function Shell({ me, theme, toggleTheme, onLogout }: { me: Me; theme: 'dark' | '
         if (msg.kind === 'alert') {
           const a: Alert = { ...msg.data, type_code: msg.data.type }
           setLiveAlerts((xs) => [a, ...xs].slice(0, 200))
-          if (a.type_code !== 'RAPID_SOH_DROP') {
-            setToasts((xs) => [a, ...xs].slice(0, 3))
+          // car-screen style: at most one notification every 10 s, never more than two on screen
+          if (a.type_code !== 'RAPID_SOH_DROP' && Date.now() - lastToast.current > 10000) {
+            lastToast.current = Date.now()
+            setToasts((xs) => [a, ...xs].slice(0, 2))
             setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== a.id)), 6500)
           }
         }

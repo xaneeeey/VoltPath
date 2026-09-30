@@ -154,12 +154,16 @@ export function MapView({ theme, selectedVin, selectedPos, route, highlight, onS
   // ------------------------------------------------------------ selection / route / highlights
   useEffect(() => { setData('selected', pointFC(selectedPos)) }, [selectedPos])
 
+  // fly once per newly selected vehicle, as soon as its position is known
+  const flown = useRef<string | null>(null)
   useEffect(() => {
     const m = map.current
-    if (m && selectedPos && selectedVin) m.flyTo({ center: selectedPos, zoom: Math.max(m.getZoom(), 14), speed: 1.4 })
-    // only when the selected vehicle changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVin])
+    if (!selectedVin) { flown.current = null; return }
+    if (m && selectedPos && flown.current !== selectedVin) {
+      flown.current = selectedVin
+      m.flyTo({ center: selectedPos, zoom: Math.max(m.getZoom(), 14.5), speed: 1.4 })
+    }
+  }, [selectedVin, selectedPos])
 
   useEffect(() => {
     setData('route', route && route.length > 1 ? { type: 'Feature', geometry: { type: 'LineString', coordinates: route }, properties: {} } : empty)

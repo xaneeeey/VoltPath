@@ -72,7 +72,17 @@ def load_kb(url: str | None = None) -> int:
 
 
 async def search_kb(conn, query: str, k: int = 3) -> list[dict]:
+    """Hybrid retrieval: exact DTC-code matches first (lexical, precise), then vector k-NN."""
+    from voltcore.dtc import parse_dtcs
+
+    exact = []
+    codes = parse_dtcs(query)
+    if codes:
+        exact = await (await conn.execute(
+            "SELECT title, body, 1.0 AS score FROM kb_chunk WHERE title ILIKE ANY(%s) LIMIT %s",
+            ([f"%{c}%" for c in codes], k))).fetchall()
     rows = await (await conn.execute(
         "SELECT title, body, round((1 - (embedding <=> %s::vector))::numeric, 3) AS score FROM kb_chunk "
         "ORDER BY embedding <=> %s::vector LIMIT %s", (vec_literal(embed(query)),) * 2 + (k,))).fetchall()
-    return rows
+    seen = {r["title"] for r in exact}
+    return (exact + [r for r in rows if r["title"] not in seen])[:k]

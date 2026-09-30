@@ -169,7 +169,8 @@ async def fallback_chat(p: Principal, messages: list[dict], note: str = "") -> d
         res, raw = await use("battery_health_report", {"limit": 5})
         if res:
             lines.append("**Packs closest to 80 % SoH:**")
-            lines += [f"- {r['vin']} ({r['model_code']}): SoH {r['soh_now']:.1f}%, ~{r['days_to_80']} days"
+            lines += [f"- {r['vin']} ({r['model_code']}): SoH {r['soh_now']:.1f}%, "
+                      + ("already below 80 %" if r["soh_now"] <= 80 else f"~{r['days_to_80']} days to 80 %")
                       for r in res["at_risk"]]
             if res["anomalies"]:
                 lines.append(f"{len(res['anomalies'])} packs are degrading abnormally fast.")

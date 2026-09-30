@@ -136,7 +136,7 @@ def plan_charging(*, capacity_kwh: float, soc_pct: float, target_soc_pct: float,
     slot_kw = slot_grid / SLOT_H
     energy_cost = float((slot_grid * prices).sum())
     wear = float((wear_alpha * (slot_kw / charger_kw) ** 2 * slot_grid).sum())
-    final_soc = min(100.0, soc_pct + slot_batt.sum() / capacity_kwh * 100)
+    final_soc = float(min(100.0, soc_pct + slot_batt.sum() / capacity_kwh * 100))
 
     base = baseline_asap(capacity_kwh=capacity_kwh, soc_pct=soc_pct, target_soc_pct=target_soc_pct,
                          charger_kw=charger_kw, prices=prices, wear_alpha=wear_alpha, efficiency=efficiency)
@@ -157,7 +157,7 @@ def baseline_asap(*, capacity_kwh, soc_pct, target_soc_pct, charger_kw, prices, 
         batt = min(kw * SLOT_H * efficiency, (target_soc_pct - soc) / 100 * capacity_kwh)
         grid = batt / efficiency
         real_kw = grid / SLOT_H
-        cost += p * grid + wear_alpha * (real_kw / charger_kw) ** 2 * grid
+        cost += float(p) * grid + wear_alpha * (real_kw / charger_kw) ** 2 * grid
         soc += batt / capacity_kwh * 100
     return round(cost, 2)
 

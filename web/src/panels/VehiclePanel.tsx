@@ -53,29 +53,28 @@ export function VehiclePanel({ ctx, vin }: { ctx: Ctx; vin: string }) {
         {st && <Pill tone={tone as 'ok'}>{st.status.toLowerCase()}</Pill>}
       </div>
 
-      <div className="relative mt-2 flex items-center justify-center">
-        <CarGraphic soc={st?.soc ?? 0} status={st?.status} className="h-[300px]" />
-        {st && (
-          <div className="absolute left-0 top-1/2 -translate-y-1/2">
-            <div className="text-[56px] font-extralight leading-none tracking-tight tabular" style={{ color: socColor(st.soc) }}>
-              {Math.round(st.soc)}<span className="text-xl text-muted">%</span>
-            </div>
-            {d.range && (
-              <div className="mt-2">
-                <div className="text-2xl font-light tabular">{fmt.n(d.range.range_km)} <span className="text-sm text-muted">km</span></div>
-                <div className="text-[11px] text-muted">
-                  {d.range.ml_km != null ? 'ML estimate' : 'estimate'} · rated {fmt.n(d.range.baseline_km)} km
-                </div>
+      <div className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2">
+        <div className="min-w-0">
+          {st ? (
+            <>
+              <div className="text-[64px] font-extralight leading-none tracking-tight tabular" style={{ color: socColor(st.soc) }}>
+                {Math.round(st.soc)}<span className="text-xl text-muted">%</span>
               </div>
-            )}
-          </div>
-        )}
-        {st && st.status === 'CHARGING' && (
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 text-right">
-            <div className="text-2xl font-light tabular text-ok">{fmt.n(st.power, 1)}</div>
-            <div className="label">kW</div>
-          </div>
-        )}
+              {d.range && (
+                <div className="mt-4">
+                  <div className="text-3xl font-light tabular">{fmt.n(d.range.range_km)} <span className="text-base text-muted">km</span></div>
+                  <div className="mt-1 text-[11px] leading-snug text-muted">
+                    {d.range.ml_km != null ? 'ML range estimate' : 'range estimate'}<br />rated {fmt.n(d.range.baseline_km)} km
+                  </div>
+                </div>
+              )}
+              {st.status === 'CHARGING' && (
+                <div className="mt-4"><span className="text-2xl font-light tabular text-ok">{fmt.n(st.power, 1)}</span> <span className="label">kW</span></div>
+              )}
+            </>
+          ) : <div className="text-sm text-muted">No live telemetry yet.</div>}
+        </div>
+        <CarGraphic soc={st?.soc ?? 0} status={st?.status} className="h-[280px] w-[140px]" />
       </div>
 
       {st && (
