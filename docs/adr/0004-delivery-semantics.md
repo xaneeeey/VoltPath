@@ -17,3 +17,16 @@ OEM clouds retry webhooks (duplicates), buffer during outages (bursts of old dat
 - Exactly-once transactions (Kafka EOS) aren't needed and don't span Redis/Postgres anyway.
 - The Bloom filter can drop a genuinely new event on a false positive (1 in 10,000 per replica). Accepted: periodic telemetry is redundant, and lifecycle events carry distinct seqs.
 - The chaos test (`make chaos`) kills the broker and a processor mid-stream and asserts there are no seq gaps in the warm store for sampled vehicles.
+
+## Evidence: what the chaos test found (and fixed)
+The first `make chaos` run **lost about 30K acknowledged events**. Two defects combined:
+1. Redpanda's dev-container mode enables **write caching**: the broker acks before fsync, so SIGKILL drops acknowledged data. The idempotent producer then hit `OUT_OF_ORDER_SEQUENCE` (fatal), and librdkafka purged its queue.
+2. The gateway returned `202` once records were **queued locally**, not once the broker had them.
+
+Fixes:
+- The gateway answers `202` only after the broker acknowledges every record in the batch (`acks=all`). Otherwise it returns `503 Retry-After`.
+- Batch keys are added to the Bloom filter only after the ack, so a retried batch isn't mistaken for a duplicate.
+- The gateway replaces the producer automatically after a fatal error.
+- `write_caching_default=false` is set on the cluster and `write.caching=false` on each topic.
+
+The rerun stored **15,000 / 15,000** events exactly once. The client retried 4 times while the broker was down (`tests/chaos/results/`).

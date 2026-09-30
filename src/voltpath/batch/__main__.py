@@ -17,18 +17,19 @@ from voltpath.config import settings, setup_logging
 from voltpath.ml import MODEL_FILE
 
 
-def run_all() -> None:
+def run_all(force: bool = True) -> None:
     jobs.history()
     jobs.rollup()
-    jobs.forecast()
-    jobs.energy_rollup()
+    if force or not jobs.forecast_is_fresh():
+        jobs.forecast()
+        jobs.energy_rollup()
     if not (Path(settings().model_dir) / MODEL_FILE).exists():
         train()
 
 
 def scheduler() -> None:
     log = setup_logging("batch")
-    run_all()
+    run_all(force=False)  # container restarts must not redo a fresh 100K-vehicle forecast
     last_forecast = time.time()
     while True:
         time.sleep(600)

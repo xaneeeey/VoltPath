@@ -1,0 +1,6 @@
+apiVersion: v2
+name: voltpath
+description: VoltPath - EV charging & battery-health intelligence (ingest, stream processor, lake writer, API, web, batch)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

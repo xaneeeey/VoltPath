@@ -34,6 +34,15 @@ HIST_SCHEMA = pa.schema([("day", pa.date32()), ("vin", pa.string()), ("tenant_id
                          ("charge_cost", pa.float32())])
 
 
+def _duck() -> duckdb.DuckDBPyConnection:
+    """Bounded DuckDB: spills to disk instead of growing past the container's memory budget."""
+    con = _duck()
+    con.execute("SET memory_limit = '1500MB'")
+    con.execute("SET threads = 4")
+    con.execute("SET temp_directory = '/tmp/duckdb_spill'")
+    return con
+
+
 def _pg():
     return psycopg.connect(settings().database_url)
 
@@ -109,7 +118,7 @@ def rollup(day: date | None = None) -> int:
         log.info("rollup: no lake data for %s", day)
         return 0
     dataset = ds.dataset(path, filesystem=fs, format="parquet", partitioning="hive")
-    con = duckdb.connect()
+    con = _duck()
     con.register("t", dataset)
     rows = con.execute("""
         WITH d AS (
@@ -148,7 +157,7 @@ def forecast() -> int:
     s = settings()
     fs = s3fs()
     dataset = ds.dataset(f"{s.lake_bucket}/history/battery_daily", filesystem=fs, format="parquet")
-    con = duckdb.connect()
+    con = _duck()
     con.register("h", dataset)
     w = generate(s.seed, s.n_vehicles)
     con.register("models", pa.table({"vin": w.vin, "model_code": w.model_code}))
@@ -214,6 +223,13 @@ def forecast() -> int:
         c.commit()
     log.info("forecast written (%d vehicles, %d new RAPID_SOH_DROP alerts)", len(res), n_alerts)
     return len(res)
+
+
+def forecast_is_fresh(max_age_h: float = 6) -> bool:
+    with _pg() as c:
+        row = c.execute("SELECT max(computed_at) > now() - make_interval(hours => %s) FROM soh_forecast",
+                        (max_age_h,)).fetchone()
+    return bool(row and row[0])
 
 
 def _embedding(curve, dc, km, temp, whkm) -> str:

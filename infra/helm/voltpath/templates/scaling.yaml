@@ -1,0 +1,36 @@
+{{- range $name, $v := dict "ingest" .Values.ingest "api" .Values.api }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: voltpath-{{ $name }} }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: voltpath-{{ $name }} }
+  minReplicas: {{ $v.hpa.min }}
+  maxReplicas: {{ $v.hpa.max }}
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $v.hpa.cpuTarget }} } } }]
+{{- end }}
+{{- if .Values.processor.keda.enabled }}
+---
+# Scale stream processors on Kafka consumer lag (KEDA), capped by the partition count.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: { name: voltpath-processor }
+spec:
+  scaleTargetRef: { name: voltpath-processor }
+  minReplicaCount: {{ .Values.processor.keda.min }}
+  maxReplicaCount: {{ .Values.processor.keda.max }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ .Values.endpoints.kafkaBootstrap | quote }}
+        consumerGroup: processor
+        topic: telemetry.raw
+        lagThreshold: {{ .Values.processor.keda.lagThreshold | quote }}
+{{- end }}
+{{- range $name := list "ingest" "processor" "api" }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: voltpath-{{ $name }} }
+spec: { minAvailable: 1, selector: { matchLabels: { app: voltpath-{{ $name }} } } }
+{{- end }}

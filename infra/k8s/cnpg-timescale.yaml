@@ -1,0 +1,22 @@
+# PostgreSQL 16 + TimescaleDB + pgvector on any Kubernetes (EKS/GKE/AKS) via CloudNativePG.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: voltpath-pg, namespace: voltpath }
+spec:
+  instances: 3                          # primary + 2 synchronous-capable replicas across AZs
+  imageName: timescale/timescaledb-ha:pg16
+  postgresql:
+    shared_preload_libraries: [timescaledb, pg_stat_statements]
+    parameters: { shared_buffers: 8GB, max_connections: "400", synchronous_commit: "on" }
+    synchronous: { method: any, number: 1 }   # billing/audit writes survive a primary loss (CP)
+  bootstrap: { initdb: { database: voltpath, owner: voltpath } }
+  storage: { size: 1Ti, storageClass: gp3-encrypted }
+  affinity:
+    nodeSelector: { workload: db }
+    tolerations: [{ key: workload, operator: Equal, value: db, effect: NoSchedule }]
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://voltpath-prod-lake/pg-backups
+      s3Credentials: { inheritFromIAMRole: true }
+      wal: { compression: gzip, encryption: AES256 }
+    retentionPolicy: "30d"

@@ -28,25 +28,29 @@ class BloomFilter:
         self.capacity = capacity
         self.m = max(8, int(-capacity * math.log(fp_rate) / (math.log(2) ** 2)))
         self.k = max(1, round(self.m / capacity * math.log(2)))
-        self.bits = np.zeros((self.m + 7) // 8, dtype=np.uint8)
+        # bytearray, not numpy: single-element access is ~5x cheaper than numpy scalar indexing,
+        # and this runs k times per ingested event
+        self.bits = bytearray((self.m + 7) // 8)
         self.count = 0
 
     def add(self, key: str | bytes) -> bool:
         """Insert; returns True if the key was (probably) already present."""
         kb = key.encode() if isinstance(key, str) else key
+        bits = self.bits
         present = True
         for h in _hashes(kb, self.k, self.m):
-            byte, bit = divmod(h, 8)
-            if not (self.bits[byte] >> bit) & 1:
+            byte, mask = h >> 3, 1 << (h & 7)
+            if not bits[byte] & mask:
                 present = False
-                self.bits[byte] |= 1 << bit
+                bits[byte] |= mask
         if not present:
             self.count += 1
         return present
 
     def __contains__(self, key: str | bytes) -> bool:
         kb = key.encode() if isinstance(key, str) else key
-        return all((self.bits[h // 8] >> (h % 8)) & 1 for h in _hashes(kb, self.k, self.m))
+        bits = self.bits
+        return all(bits[h >> 3] & (1 << (h & 7)) for h in _hashes(kb, self.k, self.m))
 
     @property
     def saturated(self) -> bool:
@@ -61,6 +65,9 @@ class RotatingBloom:
         self._cap, self._fp = capacity, fp_rate
         self.active = BloomFilter(capacity, fp_rate)
         self.previous: BloomFilter | None = None
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.active or (self.previous is not None and key in self.previous)
 
     def seen(self, key: str) -> bool:
         if self.previous is not None and key in self.previous:

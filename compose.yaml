@@ -6,12 +6,14 @@ x-app: &app
   build: { context: ., dockerfile: infra/docker/python.Dockerfile }
   image: voltpath/python:dev
   restart: unless-stopped
+  mem_limit: 1g   # per-container ceilings: one runaway service must not OOM the whole VM
   env_file: [ .env.example ]
   environment: &appenv
     DATABASE_URL: postgresql://voltpath:voltpath@postgres:5432/voltpath
     APP_DATABASE_URL: postgresql://voltpath_app:voltpath_app@postgres:5432/voltpath
     REDIS_URL: redis://redis:6379/0
     KAFKA_BOOTSTRAP: redpanda:9092
+    REDPANDA_ADMIN_URL: http://redpanda:9644
     S3_ENDPOINT: http://seaweedfs:8333
     JWT_PRIVATE_KEY_PATH: /secrets/jwt_private.pem
   volumes:
@@ -28,6 +30,7 @@ services:
   postgres:
     image: timescale/timescaledb-ha:pg16
     restart: unless-stopped
+    mem_limit: 3g
     environment:
       POSTGRES_USER: voltpath
       POSTGRES_PASSWORD: voltpath
@@ -48,6 +51,7 @@ services:
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     restart: unless-stopped
+    mem_limit: 2560m
     command:
       - redpanda
       - start
@@ -76,6 +80,7 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
+    mem_limit: 2300m
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "2gb",
               "--maxmemory-policy", "volatile-lru"]
     ports: ["6379:6379"]
@@ -106,6 +111,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
@@ -162,6 +168,7 @@ services:
 
   batch:
     <<: *app
+    mem_limit: 2500m
     command: ["python", "-m", "voltpath.batch", "scheduler"]
 
   api:

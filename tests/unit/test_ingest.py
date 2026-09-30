@@ -19,11 +19,14 @@ class FakeProducer:
         self.msgs: list[tuple[str, bytes | None, bytes]] = []
         self.fail_after = fail_after
         self.queue_len = 0
+        self.ack_error = None
 
     def produce(self, topic, key=None, value=None, on_delivery=None):
         if self.fail_after is not None and len(self.msgs) >= self.fail_after:
             raise BufferError("queue full")
         self.msgs.append((topic, key, value))
+        if on_delivery:
+            on_delivery(self.ack_error, None)
 
     def poll(self, _t):
         return 0
@@ -124,6 +127,17 @@ def test_buffer_error_mid_batch_is_429():
     body = orjson.dumps([ENCODERS["voltra"](canon(seq=i)) for i in range(1, 4)])
     r = c.post("/v1/oem/voltra/telemetry", content=body, headers=sign(gw.s.oem_secret_map["voltra"], body))
     assert r.status_code == 429
+
+
+def test_unacknowledged_batch_is_503_and_stays_retryable(client):
+    c, gw, prod = client
+    body = orjson.dumps([ENCODERS["voltra"](canon(seq=77))])
+    prod.ack_error = "broker lost it"
+    r = c.post("/v1/oem/voltra/telemetry", content=body, headers=sign(gw.s.oem_secret_map["voltra"], body))
+    assert r.status_code == 503 and r.headers["retry-after"] == "2"
+    prod.ack_error = None   # broker healthy again: the retry must be accepted, not treated as a duplicate
+    r = c.post("/v1/oem/voltra/telemetry", content=body, headers=sign(gw.s.oem_secret_map["voltra"], body))
+    assert r.status_code == 202 and r.json()["accepted"] == 1
 
 
 def test_bad_body(client):

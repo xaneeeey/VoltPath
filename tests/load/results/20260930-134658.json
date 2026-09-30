@@ -1,0 +1,75 @@
+{
+  "offered_rate": 100000.0,
+  "duration_s": 33.4,
+  "burst": 1.0,
+  "events_sent": 179000,
+  "events_accepted": 173000,
+  "client_offered_eps": 5361,
+  "client_accepted_eps": 5182,
+  "requests": 173,
+  "http_429": 0,
+  "errors": 6,
+  "batch_latency_ms": {
+    "p50": 8877.8,
+    "p95": 16755.0,
+    "p99": 21879.1
+  },
+  "server": {
+    "peak_ingest_eps": 928,
+    "peak_processed_eps": 1346,
+    "max_consumer_lag": 802621,
+    "final_consumer_lag": 538721,
+    "max_ingest_to_state_p95_s": 300.0
+  },
+  "samples": [
+    {
+      "t": 1790756178.109975,
+      "ingest_eps": 0.0,
+      "processed_eps": 496.856601137611,
+      "lag": 802621.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756183.839782,
+      "ingest_eps": 0.0,
+      "processed_eps": 1345.5080769615183,
+      "lag": 792621.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756189.7712839,
+      "ingest_eps": 0.0,
+      "processed_eps": 513.4974379503603,
+      "lag": 792621.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756195.088447,
+      "ingest_eps": 0.0,
+      "processed_eps": 494.40000000000003,
+      "lag": 548721.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756200.727981,
+      "ingest_eps": 0.0,
+      "processed_eps": 914.5483645093528,
+      "lag": 538721.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756208.871524,
+      "ingest_eps": 0.0,
+      "processed_eps": 499.7501249375312,
+      "lag": 538721.0,
+      "age_p95_s": 300.0
+    },
+    {
+      "t": 1790756214.111667,
+      "ingest_eps": 928.3381364073008,
+      "processed_eps": 499.50049950049953,
+      "lag": 538721.0,
+      "age_p95_s": 300.0
+    }
+  ]
+}

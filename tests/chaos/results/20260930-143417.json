@@ -1,0 +1,22 @@
+{
+  "expected": 15000,
+  "stored": 15000,
+  "missing_by_vin": {},
+  "duplicates_possible": false,
+  "passed": true,
+  "send_seconds": 100.3,
+  "recovery_seconds_total": 136.9,
+  "client_retries": 4,
+  "chaos_timeline": [
+    "14:32:06 kill redpanda",
+    "14:32:10 kill processor-1",
+    "14:32:22 start redpanda",
+    "14:32:27 start processor-1"
+  ],
+  "client_errors_sample": [
+    "14:32:16 ReadTimeout",
+    "14:32:27 ReadTimeout",
+    "14:32:37 ReadTimeout",
+    "14:32:48 ReadTimeout"
+  ]
+}
