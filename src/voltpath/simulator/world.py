@@ -85,7 +85,8 @@ class Shard:
         self.charge_target = self.rng.uniform(80, 95, n)
         self.charger = np.full(n, -1, dtype=np.int64)
         self.charger_kw = np.zeros(n)
-        self.seq = self.rng.integers(1_000, 50_000, n).astype(np.int64)
+        # epoch-based start keeps sequences monotonic across simulator restarts
+        self.seq = (int(now.timestamp()) * 4 + self.rng.integers(0, 1_000, n)).astype(np.int64)
         self.hot_until = np.zeros(n)  # defect heat episodes
         self.routes: list[ActiveRoute | None] = [None] * n
         self.emit_acc = self.rng.random(n)

@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     seed_password: str = "voltpath-demo"
 
     anthropic_api_key: str | None = None
-    copilot_model: str = "claude-sonnet-5"
+    copilot_model: str = "claude-opus-5"
 
     ingest_max_inflight: int = 400_000
     metrics_port: int = 9100

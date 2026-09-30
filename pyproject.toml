@@ -26,6 +26,8 @@ dependencies = [
     "prometheus-client>=0.20",
     "anthropic>=0.40",
     "python-json-logger>=2.0",
+    "python-multipart>=0.0.32",
+    "hiredis>=3.4.2",
 ]
 
 [dependency-groups]
@@ -64,7 +66,7 @@ show_missing = true
 skip_covered = true
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]

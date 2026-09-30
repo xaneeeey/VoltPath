@@ -27,7 +27,6 @@ from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 from voltcore.charging_dp import TariffWindow, price_at
 from voltcore.energy import MODELS_BY_CODE
-from voltcore.geo import encode
 from voltcore.graph import RoadGraph
 from voltcore.schema import parse_ts
 from voltcore.sketches import CountMinSketch
@@ -40,7 +39,7 @@ from voltpath.processor.rules import (
     range_rule,
     simple_rules,
 )
-from voltpath.processor.state import DUPLICATE, NEW, TOO_LATE, VehicleState
+from voltpath.processor.state import DUPLICATE, NEW, TOO_LATE, VehicleState, cell_key
 
 PROCESSED = Counter("processor_events_total", "events by outcome", ["result"])
 AGE = Histogram("processor_event_age_seconds", "ingest-to-state latency (now - event ts)",
@@ -51,8 +50,15 @@ ALERTS = Counter("processor_alerts_total", "alerts raised", ["type"])
 BATCH = Histogram("processor_batch_seconds", "batch processing time", buckets=(.01, .05, .1, .25, .5, 1, 2))
 LAG = Gauge("processor_consumer_lag", "messages behind high watermark", ["partition"])
 STORED = Counter("processor_rows_stored_total", "rows written", ["table"])
+TELEMETRY_REPLAY = Counter("processor_telemetry_replay_batches_total", "batches that hit the duplicate-key slow path")
+PHASE = Histogram("processor_phase_seconds", "time per pipeline phase", ["phase"],
+                  buckets=(.001, .005, .01, .025, .05, .1, .25, .5, 1, 2))
+# pre-bound children: label lookup costs ~4 us, too much per event at 100K ev/s
+C_APPLIED, C_DUP, C_LATE = (PROCESSED.labels(x) for x in ("applied", "duplicate", "late"))
+PH_PROCESS, PH_REDIS, PH_PG = (PHASE.labels(x) for x in ("process", "redis", "postgres"))
 
 OFFLINE_S = 180
+WARM_EVERY_S = 30
 STATE_FLUSH_S = 2.0
 
 
@@ -89,7 +95,6 @@ class Processor:
         self.r = redis.Redis.from_url(self.s.redis_url)
         self.graph = RoadGraph.load(self.s.graph_path)
         self.states: dict[int, dict[str, VehicleState]] = defaultdict(dict)
-        self.dirty: dict[int, set[str]] = defaultdict(set)
         self.cms = CountMinSketch(eps=0.002, delta=0.01, top_k=15)
         self.cms_reset = time.time()
         self.free_nodes: dict[int, int] = {n: sid for sid, n in self.ref.station_node.items()}
@@ -110,23 +115,29 @@ class Processor:
         self.pg.commit()
 
     # ------------------------------------------------------------------ rebalance
+    # State is restored lazily: the first time this owner sees a VIN it HMGETs the checkpoint
+    # the previous owner left in `vs:{tenant}` (see _restore), so rebalances are instant.
     def on_assign(self, consumer, partitions):
-        for tp in partitions:
-            raw = self.r.hgetall(f"ckpt:{tp.partition}")
-            self.states[tp.partition] = {k.decode(): VehicleState.from_checkpoint(orjson.loads(v))
-                                         for k, v in raw.items()}
-            self.log.info("assigned partition %d (restored %d vehicle states)", tp.partition, len(raw))
+        self.log.info("assigned partitions %s", [tp.partition for tp in partitions])
         consumer.incremental_assign(partitions)
 
     def on_revoke(self, consumer, partitions):
         for tp in partitions:
             self.states.pop(tp.partition, None)
-            self.dirty.pop(tp.partition, None)
             try:
                 LAG.remove(str(tp.partition))
             except KeyError:
                 pass
         consumer.incremental_unassign(partitions)
+
+    def _restore(self, missing: dict[int, list[tuple[int, str]]]) -> None:
+        """missing: tenant -> [(partition, vin)] not yet in memory."""
+        for tenant, items in missing.items():
+            raws = self.r.hmget(f"vs:{tenant}", [v for _, v in items])
+            for (p, vin), raw in zip(items, raws, strict=True):
+                st = (VehicleState.from_checkpoint({**orjson.loads(raw), "vin": vin, "tenant_id": tenant}) if raw
+                      else VehicleState(vin, tenant))
+                self.states[p][vin] = st
 
     # ------------------------------------------------------------------ main loop
     def run(self):
@@ -150,47 +161,53 @@ class Processor:
 
     def process(self, msgs):
         now = time.time()
+        t_start = time.perf_counter()
         rows, alerts, trips, sessions = [], [], [], []
-        updates: dict[int, dict[str, bytes]] = defaultdict(dict)      # tenant -> vin -> public json
-        geo: dict[int, list] = defaultdict(list)
+        touched: dict[str, VehicleState] = {}                   # coalesced: one Redis write per VIN
+        n_dup = n_late = n_applied = n_unknown = 0
+        decoded = []
+        missing: dict[int, list[tuple[int, str]]] = defaultdict(list)
         for m in msgs:
             if m.error():
                 if m.error().code() != KafkaError._PARTITION_EOF:  # noqa: SLF001
                     self.log.error("consume error: %s", m.error())
                 continue
             e = orjson.loads(m.value())
-            vin = e["vin"]
-            ref = self.ref.vehicle.get(vin)
+            ref = self.ref.vehicle.get(e["vin"])
             if ref is None:
-                PROCESSED.labels("unknown_vin").inc()
+                n_unknown += 1
                 continue
-            tenant_id, model = ref
             p = m.partition()
-            st = self.states[p].get(vin)
-            if st is None:
-                st = VehicleState(vin, tenant_id)
-                self.states[p][vin] = st
+            if e["vin"] not in self.states[p]:
+                missing[ref[0]].append((p, e["vin"]))
+                self.states[p][e["vin"]] = None  # placeholder, filled by _restore
+            decoded.append((p, e, ref))
+        if missing:
+            self._restore(missing)
+        for p, e, (tenant_id, model) in decoded:
+            vin = e["vin"]
+            st = self.states[p][vin]
             ts = parse_ts(e["ts"]).timestamp()
-            verdict = st.check_seq(e["seq"])
+            verdict = st.check_seq(e["seq"], ts)
             if verdict == DUPLICATE:
-                PROCESSED.labels("duplicate").inc()
+                n_dup += 1
                 continue
             in_order = verdict == NEW and ts >= st.ts
-            # warm store: downsample periodic events to 1 per 10 s per vehicle; keep all lifecycle events
-            if e["evt"] != "PERIODIC" or ts - st.stored_ts >= 10 or not in_order:
+            # warm store: downsample periodic events to 1 per 30 s per vehicle; keep all lifecycle events
+            if e["evt"] != "PERIODIC" or ts - st.stored_ts >= WARM_EVERY_S or not in_order:
                 rows.append((e["ts"], vin, tenant_id, e["lat"], e["lon"], e["speed_kmh"], e["soc_pct"], e["soh_pct"],
                              e["batt_temp_c"], e["odo_km"], e["power_kw"], e["evt"]))
                 if in_order:
                     st.stored_ts = ts
             if verdict == TOO_LATE or not in_order:
-                PROCESSED.labels("late").inc()
+                n_late += 1
+                touched[vin] = st  # dedup window changed - checkpoint it
                 continue
             facts = st.apply(e, ts)
-            self.dirty[p].add(vin)
-            AGE.observe(max(0.0, now - ts))
-            PROCESSED.labels("applied").inc()
-            updates[tenant_id][vin] = orjson.dumps(st.to_public())
-            geo[tenant_id].extend((st.lon, st.lat, vin))
+            n_applied += 1
+            if n_applied % 8 == 0:
+                AGE.observe(max(0.0, now - ts))   # sampled: the histogram shape is what matters
+            touched[vin] = st
             for kind, f in facts:
                 (trips if kind == "trip" else sessions).append((st, f))
             if e["evt"] == "CHARGE_START" and e.get("charger_id") in self.ref.charger:
@@ -205,21 +222,31 @@ class Processor:
                     a = range_rule(vin, tenant_id, e, ts, model, self.graph, self.free_nodes)
                     if a:
                         alerts.append(a)
-        self.flush(rows, updates, geo, trips, sessions, alerts)
+        C_APPLIED.inc(n_applied)
+        C_DUP.inc(n_dup)
+        C_LATE.inc(n_late)
+        if n_unknown:
+            PROCESSED.labels("unknown_vin").inc(n_unknown)
+        PH_PROCESS.observe(time.perf_counter() - t_start)
+        self.flush(rows, touched, trips, sessions, alerts)
 
     # ------------------------------------------------------------------ sinks
-    def flush(self, rows, updates, geo, trips, sessions, alerts):
+    def flush(self, rows, touched: dict[str, VehicleState], trips, sessions, alerts):
+        t0 = time.perf_counter()
+        states: dict[int, dict[str, bytes]] = defaultdict(dict)
+        geo: dict[int, list] = defaultdict(list)
+        for vin, st in touched.items():
+            states[st.tenant_id][vin] = orjson.dumps(st.to_checkpoint())
+            if st.moved():
+                geo[st.tenant_id].extend((st.lon, st.lat, vin))
         pipe = self.r.pipeline(transaction=False)
-        for tenant, m in updates.items():
-            pipe.hset(f"vs:{tenant}", mapping=m)
+        for tenant, m in states.items():
+            pipe.hset(f"vs:{tenant}", mapping=m)       # checkpoint == live state (API projects public fields)
         for tenant, g in geo.items():
             pipe.geoadd(f"geo:{tenant}", g)
-        for p, vins in self.dirty.items():
-            if vins:
-                sp = self.states[p]
-                pipe.hset(f"ckpt:{p}", mapping={v: orjson.dumps(sp[v].to_checkpoint()) for v in vins if v in sp})
         pipe.execute()
-        self.dirty.clear()
+        PH_REDIS.observe(time.perf_counter() - t0)
+        t0 = time.perf_counter()
 
         # cooldown dedup for alerts (idempotent across replays / replicas)
         fired: list[Alert] = []
@@ -229,14 +256,9 @@ class Processor:
                 pipe.set(f"cd:{a.type_code}:{a.vin}", 1, nx=True, ex=COOLDOWN_S.get(a.type_code, 1800))
             fired = [a for a, ok in zip(alerts, pipe.execute(), strict=True) if ok]
 
+        if rows:
+            self.write_telemetry(rows)
         with self.pg.cursor() as cur:
-            if rows:
-                with cur.copy("COPY tstage (ts, vin, tenant_id, lat, lon, speed_kmh, soc_pct, soh_pct, batt_temp_c, "
-                              "odo_km, power_kw, evt) FROM STDIN") as cp:
-                    for r in rows:
-                        cp.write_row(r)
-                cur.execute("INSERT INTO telemetry SELECT * FROM tstage ON CONFLICT DO NOTHING")
-                STORED.labels("telemetry").inc(cur.rowcount)
             for st, f in trips:
                 s, e = f["start"], f["end"]
                 km = max(0.0, e["odo"] - s["odo"])
@@ -269,6 +291,7 @@ class Processor:
                 aid, created = cur.fetchone()
                 published.append((a, aid, created))
         self.pg.commit()
+        PH_PG.observe(time.perf_counter() - t0)
         if published:
             pipe = self.r.pipeline(transaction=False)
             for a, aid, created in published:
@@ -279,8 +302,37 @@ class Processor:
                 ALERT_LAT.observe(max(0.0, time.time() - a.event_ts))
             pipe.execute()
 
+    TCOLS = "ts, vin, tenant_id, lat, lon, speed_kmh, soc_pct, soh_pct, batt_temp_c, odo_km, power_kw, evt"
+
+    def write_telemetry(self, rows) -> None:
+        """Optimistic fast path: COPY straight into the hypertable (one round trip, no index probe per
+        row for conflict handling). A replay after a crash hits the (vin, ts) primary key; only then
+        fall back to staging + INSERT ... ON CONFLICT DO NOTHING. Same end state, ~5x cheaper normally."""
+        try:
+            with self.pg.cursor() as cur, cur.copy(f"COPY telemetry ({self.TCOLS}) FROM STDIN") as cp:
+                for r in rows:
+                    cp.write_row(r)
+            self.pg.commit()
+            STORED.labels("telemetry").inc(len(rows))
+            return
+        except psycopg.errors.UniqueViolation:
+            self.pg.rollback()
+            TELEMETRY_REPLAY.inc()
+        with self.pg.cursor() as cur:
+            with cur.copy(f"COPY tstage ({self.TCOLS}) FROM STDIN") as cp:
+                for r in rows:
+                    cp.write_row(r)
+            cur.execute("INSERT INTO telemetry SELECT * FROM tstage ON CONFLICT DO NOTHING")
+            STORED.labels("telemetry").inc(cur.rowcount)
+        self.pg.commit()
+
     # ------------------------------------------------------------------ periodic aggregates
     def publish_aggregates(self, now: float):
+        t_agg = time.perf_counter()
+        self._publish_aggregates(now)
+        PHASE.labels("aggregates").observe(time.perf_counter() - t_agg)
+
+    def _publish_aggregates(self, now: float):
         """Per-partition partial KPIs, map cells and charger occupancy, recomputed from local state
         (idempotent: a new owner simply overwrites the partition's keys)."""
         pipe = self.r.pipeline(transaction=False)
@@ -289,6 +341,8 @@ class Processor:
             cells: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(lambda: [0, 0.0, 0]))
             occ: dict[int, int] = defaultdict(int)
             for st in states.values():
+                if st is None:
+                    continue
                 k = kpi[st.tenant_id]
                 status = st.status if now - st.ts < OFFLINE_S else "OFFLINE"
                 k[status] += 1
@@ -300,7 +354,7 @@ class Processor:
                         k["low_soc"] += 1
                     if st.power > 0:
                         k["charging_kw"] += st.power
-                    c = cells[st.tenant_id][encode(st.lat, st.lon, 5)]
+                    c = cells[st.tenant_id][cell_key(st.lat, st.lon)]
                     c[0] += 1
                     c[1] += st.soc
                     c[2] += st.soc < 20

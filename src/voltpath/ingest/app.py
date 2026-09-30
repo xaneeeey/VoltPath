@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import orjson
@@ -70,7 +71,7 @@ class Gateway:
         s = settings()
         self.s = s
         self.secrets = {k: v.encode() for k, v in s.oem_secret_map.items()}
-        self.producer = producer or Producer({
+        self.producer = producer if producer is not None else Producer({
             "bootstrap.servers": s.kafka_bootstrap,
             "enable.idempotence": True,
             "acks": "all",
@@ -150,8 +151,15 @@ class Gateway:
 
 
 def create_app(gateway: Gateway | None = None) -> FastAPI:
-    app = FastAPI(title="VoltPath ingest", version="1.0.0", docs_url="/docs")
     state: dict = {"gw": gateway}
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        if state["gw"] is not None:
+            state["gw"].producer.flush(10)   # drain in-flight messages on shutdown (no loss on rollout)
+
+    app = FastAPI(title="VoltPath ingest", version="1.0.0", docs_url="/docs", lifespan=lifespan)
 
     def gw() -> Gateway:
         if state["gw"] is None:
@@ -187,10 +195,5 @@ def create_app(gateway: Gateway | None = None) -> FastAPI:
     @app.get("/metrics")
     def metrics():
         return metrics_response()
-
-    @app.on_event("shutdown")
-    def _flush():
-        if state["gw"] is not None:
-            state["gw"].producer.flush(10)
 
     return app

@@ -1,0 +1,38 @@
+{
+  "version": "20260930-130622",
+  "features": [
+    "soc",
+    "soh",
+    "ambient_c",
+    "avg_speed",
+    "hvac",
+    "capacity_kwh",
+    "rated_range_km",
+    "recent_wh_per_km"
+  ],
+  "n_train": 120000,
+  "n_test": 30000,
+  "baseline_rated_x_soc_x_soh": {
+    "mae_km": 22.01,
+    "rmse_km": 30.29,
+    "mape_pct": 16.82,
+    "p90_abs_err_km": 51.09,
+    "overestimate_rate": 0.84
+  },
+  "linear_regression": {
+    "mae_km": 16.16,
+    "rmse_km": 21.76,
+    "mape_pct": 22.04,
+    "p90_abs_err_km": 34.94,
+    "overestimate_rate": 0.542
+  },
+  "gradient_boosting": {
+    "mae_km": 6.82,
+    "rmse_km": 9.87,
+    "mape_pct": 4.95,
+    "p90_abs_err_km": 16.1,
+    "overestimate_rate": 0.524
+  },
+  "train_seconds": 4.2,
+  "mae_improvement_vs_baseline_pct": 69.0
+}

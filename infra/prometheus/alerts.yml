@@ -1,0 +1,28 @@
+groups:
+  - name: voltpath-slo
+    rules:
+      - alert: ConsumerLagHigh
+        expr: sum(processor_consumer_lag) > 200000
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "Stream processor falling behind ({{ $value }} messages)" }
+      - alert: IngestToStateLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(processor_event_age_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Ingest-to-dashboard p95 above 2 s SLO" }
+      - alert: AlertLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(processor_alert_latency_seconds_bucket[5m])) by (le)) > 5
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Critical alert latency p95 above 5 s SLO" }
+      - alert: ApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(api_request_seconds_bucket[5m])) by (le)) > 0.2
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "API p95 above 200 ms" }
+      - alert: IngestThrottling
+        expr: sum(rate(ingest_throttled_total[5m])) > 1
+        for: 5m
+        labels: { severity: ticket }
+        annotations: { summary: "Ingest applying back-pressure (429s)" }
